@@ -1,6 +1,6 @@
 # Devoq AI
 
-**Intelligent AI-powered platform for smart automation and decision-making.**
+**A Microservice-Based Software Platform for Real-Time Object Counting**
 
 Built as a modern microservice architecture with Vue.js frontend and Express.js backend, fully containerized with Docker.
 
