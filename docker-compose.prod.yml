@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      CORS_ORIGIN: https://devoq-ai.com
+      JWT_SECRET: ${JWT_SECRET}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.devoq-ai-backend.rule=Host(`devoq-ai.com`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.devoq-ai-backend.entrypoints=websecure"
+      - "traefik.http.routers.devoq-ai-backend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.devoq-ai-backend.loadbalancer.server.port=3000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.devoq-ai-frontend.rule=Host(`devoq-ai.com`)"
+      - "traefik.http.routers.devoq-ai-frontend.entrypoints=websecure"
+      - "traefik.http.routers.devoq-ai-frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.devoq-ai-frontend.loadbalancer.server.port=80"

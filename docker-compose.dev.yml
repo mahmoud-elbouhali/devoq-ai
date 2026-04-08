@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./backend/src:/app/src
+      - ./shared:/app/shared
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      CORS_ORIGIN: http://localhost:5173,http://127.0.0.1:5173,http://devoq-ai.local
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.devoq-ai-backend-dev.rule=Host(`devoq-ai.local`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.devoq-ai-backend-dev.entrypoints=web"
+      - "traefik.http.services.devoq-ai-backend-dev.loadbalancer.server.port=3000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5174:80"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./shared:/app/shared
+    environment:
+      VITE_API_URL: http://devoq-ai.local/api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.devoq-ai-frontend-dev.rule=Host(`devoq-ai.local`)"
+      - "traefik.http.routers.devoq-ai-frontend-dev.entrypoints=web"
+      - "traefik.http.routers.devoq-ai-frontend-dev.loadbalancer.server.port=80"
