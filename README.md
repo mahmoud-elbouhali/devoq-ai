@@ -2,7 +2,7 @@
 
 **A Microservice-Based Software Platform for Real-Time Object Counting**
 
-Built as a modern microservice architecture with Vue.js frontend and Express.js backend, fully containerized with Docker.
+Built as a modern microservice architecture with Vue.js frontend, an Express.js orchestration backend, and a dedicated AI counting microservice, fully containerized with Docker.
 
 ---
 
@@ -12,6 +12,7 @@ Built as a modern microservice architecture with Vue.js frontend and Express.js 
 |------------|-------------------------------------|
 | Frontend   | Vue 3, Vite, Tailwind CSS 4, Pinia |
 | Backend    | Node.js, Express, TypeScript        |
+| AI Service | Python, FastAPI, Pillow, NumPy      |
 | Infra      | Docker, Traefik, Nginx              |
 | Testing    | Vitest                              |
 
@@ -19,6 +20,7 @@ Built as a modern microservice architecture with Vue.js frontend and Express.js 
 
 ```
 devoq-ai/
+├── ai-service/       # AI counting microservice (FastAPI)
 ├── backend/          # Express API (TypeScript)
 ├── frontend/         # Vue 3 SPA (Vite + Tailwind)
 ├── shared/           # Shared types & utilities
@@ -79,8 +81,36 @@ make stop
 
 | Endpoint      | Method | Description        |
 |---------------|--------|--------------------|
-| `/health`     | GET    | Health check       |
-| `/api/hello`  | GET    | Test endpoint      |
+| `/api/health` | GET    | Backend health check |
+| `/api/v1/info`| GET    | Engine info and capabilities |
+| `/api/v1/count` | POST | Count objects from an image |
+
+## Current Counting Strategy
+
+The repository now includes a real counting microservice intended for stable top-down views with dark objects on a light background. It performs:
+
+- image decoding from data URL
+- grayscale thresholding
+- simple morphology
+- connected-component counting
+
+This is a usable baseline for the current hardware setup and keeps the architecture ready for a later YOLOX-based detector behind the same API contract.
+
+## YOLOX Integration Path
+
+The AI microservice now supports two detector modes selected with `AI_DETECTOR_MODE`:
+
+- `baseline`: current connected-components fallback for simple controlled scenes
+- `yolox_onnx`: ONNX Runtime inference for a trained YOLOX model
+
+For `yolox_onnx`, provide at least:
+
+- `AI_YOLOX_MODEL_PATH=/models/yolox.onnx`
+- `AI_MODEL_VERSION=yolox-screws-v1`
+- `AI_YOLOX_CLASS_NAMES=screw`
+- `AI_YOLOX_TARGET_CLASSES=screw`
+
+The frontend and backend do not need API changes when switching from `baseline` to `yolox_onnx`.
 
 ## License
 

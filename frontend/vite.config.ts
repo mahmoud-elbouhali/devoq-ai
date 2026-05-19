@@ -19,6 +19,13 @@ export default defineConfig({
     port: 80,
     strictPort: false,
     hmr: false,
+    proxy: {
+      '/api': {
+        target: 'http://devoq-ai-backend:3000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
     watch: {
       usePolling: true,
       interval: 1000,

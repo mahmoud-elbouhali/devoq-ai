@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Camera diagnostic</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system; padding: 1.2rem; background: #0b0f17; color: #e2e8f0; max-width: 900px; margin: 0 auto; }
+    h1 { margin: 0 0 1rem; font-size: 1.2rem; }
+    .row { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0; }
+    .info { font-family: ui-monospace, SFMono-Regular, monospace; font-size: .85rem; }
+    .info span { color: #fbbf24; }
+    button { padding: .55rem .9rem; border: 0; border-radius: 8px; cursor: pointer; font: inherit; background: #1e293b; color: #e2e8f0; }
+    button.primary { background: linear-gradient(135deg, #f59e0b, #facc15); color: #111827; font-weight: 600; }
+    button:hover { filter: brightness(1.1); }
+    pre { background: #111827; padding: .8rem; border-radius: 8px; max-height: 350px; overflow-y: auto; font-size: .82rem; line-height: 1.4; border: 1px solid #1e293b; }
+    video { width: 100%; max-width: 720px; aspect-ratio: 16/9; background: #000; display: block; margin-top: 1rem; border-radius: 8px; }
+    .ok { color: #4ade80; }
+    .err { color: #f87171; }
+    .warn { color: #fbbf24; }
+    .step { color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <h1>Camera diagnostic — bypass Vue stack</h1>
+  <div class="info">
+    Origin: <span id="origin">-</span><br>
+    Secure context: <span id="secure">-</span><br>
+    mediaDevices.getUserMedia: <span id="md">-</span><br>
+    User agent: <span id="ua">-</span>
+  </div>
+
+  <div class="row">
+    <button class="primary" onclick="run()">▶ Run full diagnostic</button>
+    <button onclick="checkPermission()">1. permissions.query</button>
+    <button onclick="enumerate()">2. enumerateDevices</button>
+    <button onclick="askGUM('any')">3. getUserMedia(true)</button>
+    <button onclick="askGUM('320x240')">4. getUserMedia(320x240)</button>
+    <button onclick="runFallbackSweep()">5. fallback sweep</button>
+    <button onclick="inspectPreview()">6. inspect preview</button>
+    <button onclick="killAll()">⏹ Stop streams</button>
+    <button onclick="document.getElementById('log').textContent=''">clear log</button>
+  </div>
+
+  <div class="row" id="device-buttons"></div>
+
+  <pre id="log"></pre>
+  <video id="v" autoplay playsinline muted></video>
+
+  <script type="module">
+    import {
+      acquireCameraStream,
+      createCameraConstraintCandidates,
+      describeTrack,
+    } from "/src/utils/cameraStream.ts";
+
+    const logEl = document.getElementById('log');
+    const videoEl = document.getElementById('v');
+    const log = (msg, cls = '') => {
+      const time = new Date().toLocaleTimeString();
+      const line = document.createElement('div');
+      if (cls) line.className = cls;
+      line.textContent = `[${time}] ${msg}`;
+      logEl.prepend(line);
+    };
+
+    let activeStream = null;
+    let videoEventsHooked = false;
+
+    document.getElementById('origin').textContent = window.location.origin;
+    document.getElementById('secure').textContent = window.isSecureContext;
+    document.getElementById('md').textContent = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    document.getElementById('ua').textContent = navigator.userAgent;
+
+    hookVideoEvents();
+
+    async function checkPermission() {
+      log('— step 1: permissions.query({name: "camera"})', 'step');
+      try {
+        const status = await navigator.permissions.query({ name: 'camera' });
+        const cls = status.state === 'granted' ? 'ok' : status.state === 'denied' ? 'err' : 'warn';
+        log(`permission state: ${status.state}`, cls);
+        status.onchange = () => log(`permission changed to: ${status.state}`, 'warn');
+      } catch (e) {
+        log(`permissions.query failed: ${e.name}: ${e.message}`, 'err');
+      }
+    }
+
+    let lastDevices = [];
+
+    async function enumerate() {
+      log('— step 2: enumerateDevices', 'step');
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter(d => d.kind === 'videoinput');
+        lastDevices = cams;
+        log(`found ${cams.length} video device(s)`, cams.length ? 'ok' : 'warn');
+        cams.forEach((d, i) => {
+          const idShort = d.deviceId ? d.deviceId.substring(0, 24) + '…' : '(empty)';
+          log(`  [${i}] label="${d.label || '(empty — no permission)'}" id=${idShort}`);
+        });
+        renderDeviceButtons();
+      } catch (e) {
+        log(`enumerate failed: ${e.name}: ${e.message}`, 'err');
+      }
+    }
+
+    function renderDeviceButtons() {
+      const host = document.getElementById('device-buttons');
+      host.innerHTML = '';
+      lastDevices.forEach((d, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'primary';
+        btn.textContent = `▶ Sweep device [${i}] ${d.label || '(no label)'}`;
+        btn.onclick = () => runFallbackSweep(d.deviceId, d.label || `Camera ${i + 1}`);
+        host.appendChild(btn);
+      });
+    }
+
+    async function askGUMByDevice(deviceId, label) {
+      log(`— targeted getUserMedia for "${label}"`, 'step');
+      const start = performance.now();
+      const constraints = {
+        video: { deviceId: { exact: deviceId } },
+        audio: false,
+      };
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new DOMException('timeout 10s', 'TimeoutError')), 10000)
+      );
+      try {
+        const stream = await Promise.race([
+          navigator.mediaDevices.getUserMedia(constraints),
+          timeoutPromise,
+        ]);
+        const ms = Math.round(performance.now() - start);
+        log(`✓ stream acquired in ${ms}ms (${label})`, 'ok');
+        if (activeStream) activeStream.getTracks().forEach(t => t.stop());
+        activeStream = stream;
+        stream.getVideoTracks().forEach(track => log(`  track: ${describeTrack(track)}`, 'ok'));
+        await attachAndInspect(stream, `${label} exact`);
+      } catch (e) {
+        const ms = Math.round(performance.now() - start);
+        log(`✗ FAIL after ${ms}ms (${label}) — ${e.name}: ${e.message}`, 'err');
+      }
+    }
+
+    async function askGUM(mode) {
+      log(`— step 3: getUserMedia (${mode})`, 'step');
+      const start = performance.now();
+      const constraints = mode === '320x240'
+        ? { video: { width: 320, height: 240 }, audio: false }
+        : { video: true, audio: false };
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new DOMException('timeout 10s', 'TimeoutError')), 10000)
+      );
+
+      try {
+        const stream = await Promise.race([
+          navigator.mediaDevices.getUserMedia(constraints),
+          timeoutPromise,
+        ]);
+        const ms = Math.round(performance.now() - start);
+        log(`✓ stream acquired in ${ms}ms`, 'ok');
+        if (activeStream) activeStream.getTracks().forEach(t => t.stop());
+        activeStream = stream;
+        stream.getVideoTracks().forEach(track => log(`  track: ${describeTrack(track)}`, 'ok'));
+        await attachAndInspect(stream, mode);
+      } catch (e) {
+        const ms = Math.round(performance.now() - start);
+        log(`✗ FAIL after ${ms}ms — ${e.name}: ${e.message}`, 'err');
+      }
+    }
+
+    async function runFallbackSweep(deviceId = '', label = '') {
+      const targetLabel = label || (deviceId ? 'selected device' : 'default device');
+      log(`— fallback sweep for ${targetLabel}`, 'step');
+      killAll();
+
+      try {
+        const result = await acquireCameraStream({
+          deviceId: deviceId || undefined,
+          timeoutMs: 8000,
+          perAttemptTimeoutMs: 1500,
+          onAttempt(candidate) {
+            log(`trying candidate: ${candidate.label} ${JSON.stringify(candidate.constraints.video)}`, 'step');
+          },
+          onFailure(candidate, error) {
+            log(`candidate failed: ${candidate.label} — ${error.name}: ${error.message}`, 'err');
+          },
+        });
+
+        activeStream = result.stream;
+        log(`✓ fallback picked: ${result.candidate.label}`, 'ok');
+        result.stream.getVideoTracks().forEach(track => log(`  track: ${describeTrack(track)}`, 'ok'));
+        const preview = await attachAndInspect(result.stream, result.candidate.label);
+
+        if (preview.isBlack) {
+          log('preview is still black after fallback; trying explicit candidates one by one', 'warn');
+          result.stream.getTracks().forEach(track => track.stop());
+          activeStream = null;
+          await runExplicitCandidateSweep(deviceId);
+          return;
+        }
+
+        log('preview contains visible pixels', 'ok');
+      } catch (error) {
+        log(`fallback sweep failed — ${error.name}: ${error.message}`, 'err');
+      }
+    }
+
+    async function runExplicitCandidateSweep(deviceId = '') {
+      const candidates = createCameraConstraintCandidates(deviceId || undefined);
+      for (const candidate of candidates) {
+        try {
+          log(`manual candidate: ${candidate.label}`, 'step');
+          const stream = await navigator.mediaDevices.getUserMedia(candidate.constraints);
+          activeStream = stream;
+          stream.getVideoTracks().forEach(track => log(`  track: ${describeTrack(track)}`, 'ok'));
+          const preview = await attachAndInspect(stream, candidate.label);
+          if (!preview.isBlack) {
+            log(`✓ first visible preview found with ${candidate.label}`, 'ok');
+            return;
+          }
+
+          log(`preview stayed black for ${candidate.label}`, 'warn');
+          stream.getTracks().forEach(track => track.stop());
+          activeStream = null;
+        } catch (error) {
+          log(`candidate ${candidate.label} failed — ${error.name}: ${error.message}`, 'err');
+        }
+      }
+
+      log('no candidate produced a visible frame', 'err');
+    }
+
+    async function attachAndInspect(stream, label) {
+      if (activeStream && activeStream !== stream) {
+        activeStream.getTracks().forEach(track => track.stop());
+      }
+
+      activeStream = stream;
+      videoEl.srcObject = stream;
+
+      try {
+        await videoEl.play();
+      } catch (playErr) {
+        log(`video.play() rejected: ${playErr.name}: ${playErr.message}`, 'err');
+        throw playErr;
+      }
+
+      await waitForVideoFrame();
+      log(`✓ video ready for ${label}: ${videoEl.videoWidth}x${videoEl.videoHeight}, readyState=${videoEl.readyState}`, 'ok');
+
+      const preview = await inspectVideoFrame();
+      if (preview.isBlack) {
+        log(`preview analysis: black/very dark frame detected (avg=${preview.averageLuma.toFixed(1)})`, 'warn');
+      } else {
+        log(`preview analysis: visible frame detected (avg=${preview.averageLuma.toFixed(1)})`, 'ok');
+      }
+
+      return preview;
+    }
+
+    async function inspectPreview() {
+      if (!videoEl.srcObject) {
+        log('no active preview to inspect', 'warn');
+        return;
+      }
+
+      const preview = await inspectVideoFrame();
+      if (preview.isBlack) {
+        log(`preview is black (avg=${preview.averageLuma.toFixed(1)}, ${preview.width}x${preview.height})`, 'warn');
+      } else {
+        log(`preview has visible content (avg=${preview.averageLuma.toFixed(1)}, ${preview.width}x${preview.height})`, 'ok');
+      }
+    }
+
+    function killAll() {
+      if (activeStream) {
+        activeStream.getTracks().forEach(t => t.stop());
+        activeStream = null;
+      }
+      videoEl.srcObject = null;
+      log('streams stopped', 'warn');
+    }
+
+    async function run() {
+      logEl.textContent = '';
+      await checkPermission();
+      await enumerate();
+      await runFallbackSweep();
+    }
+
+    function hookVideoEvents() {
+      if (videoEventsHooked) {
+        return;
+      }
+
+      videoEventsHooked = true;
+      ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'pause', 'resize', 'stalled', 'suspend', 'emptied', 'error'].forEach((eventName) => {
+        videoEl.addEventListener(eventName, () => {
+          log(`video event: ${eventName} readyState=${videoEl.readyState} size=${videoEl.videoWidth}x${videoEl.videoHeight}`);
+        });
+      });
+    }
+
+    async function waitForVideoFrame(timeoutMs = 4000) {
+      if (videoEl.videoWidth > 0 && videoEl.videoHeight > 0 && videoEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        return;
+      }
+
+      await new Promise((resolve, reject) => {
+        let settled = false;
+
+        const finish = (callback) => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          clearTimeout(timer);
+          videoEl.removeEventListener('loadedmetadata', handleReady);
+          videoEl.removeEventListener('canplay', handleReady);
+          videoEl.removeEventListener('resize', handleReady);
+          callback();
+        };
+
+        const handleReady = () => {
+          if (videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+            finish(resolve);
+          }
+        };
+
+        const timer = setTimeout(() => {
+          finish(() => reject(new DOMException('video metadata did not become ready', 'AbortError')));
+        }, timeoutMs);
+
+        videoEl.addEventListener('loadedmetadata', handleReady);
+        videoEl.addEventListener('canplay', handleReady);
+        videoEl.addEventListener('resize', handleReady);
+        handleReady();
+      });
+    }
+
+    async function inspectVideoFrame() {
+      await new Promise(resolve => setTimeout(resolve, 350));
+
+      const width = Math.max(1, Math.min(videoEl.videoWidth || 1, 160));
+      const height = Math.max(1, Math.min(videoEl.videoHeight || 1, 120));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) {
+        throw new DOMException('Unable to create 2D canvas context', 'InvalidStateError');
+      }
+
+      ctx.drawImage(videoEl, 0, 0, width, height);
+      const { data } = ctx.getImageData(0, 0, width, height);
+
+      let total = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        total += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+      }
+
+      const averageLuma = total / (data.length / 4);
+      return {
+        width,
+        height,
+        averageLuma,
+        isBlack: averageLuma < 8,
+      };
+    }
+
+    window.checkPermission = checkPermission;
+    window.enumerate = enumerate;
+    window.askGUM = askGUM;
+    window.run = run;
+    window.killAll = killAll;
+    window.runFallbackSweep = runFallbackSweep;
+    window.inspectPreview = inspectPreview;
+  </script>
+</body>
+</html>

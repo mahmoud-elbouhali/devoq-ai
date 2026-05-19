@@ -4,3 +4,23 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Claude / Codex traces
+.claude/
+.codex
+.codex/
+.agents/
+
+# Docs
+docs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# ML models (binaires volumineux)
+*.onnx
+*.pth
+*.pt
+*.weights

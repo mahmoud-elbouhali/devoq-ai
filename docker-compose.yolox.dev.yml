@@ -1,0 +1,15 @@
+services:
+  ai-service:
+    environment:
+      AI_DETECTOR_MODE: yolox_onnx
+      AI_MODEL_VERSION: yolox-s-coco-official
+      AI_YOLOX_MODEL_PATH: /models/yolox.onnx
+      AI_YOLOX_CLASS_NAMES: ""
+      AI_YOLOX_TARGET_CLASSES: ""
+      AI_YOLOX_PROVIDERS: CPUExecutionProvider
+
+  backend:
+    environment:
+      COUNT_REAL_MODEL_VERSION: yolox-s-coco-official
+      AI_DETECTOR_MODE: yolox_onnx
+      AI_MODEL_VERSION: yolox-s-coco-official

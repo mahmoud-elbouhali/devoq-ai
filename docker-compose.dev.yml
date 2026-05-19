@@ -1,34 +1,68 @@
 services:
+  ai-service:
+    container_name: devoq-ai-ai-service
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    expose:
+      - "8000"
+    volumes:
+      - ./models:/models:ro
+    environment:
+      AI_DETECTOR_MODE: baseline
+      AI_MODEL_VERSION: simple-vision-v1
+      AI_YOLOX_MODEL_PATH: /models/yolox.onnx
+      AI_YOLOX_CLASS_NAMES: screw
+      AI_YOLOX_TARGET_CLASSES: screw
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks:
+      - apps_network
+
   backend:
+    container_name: devoq-ai-backend
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
     ports:
       - "3001:3000"
+    depends_on:
+      - ai-service
     volumes:
       - ./backend/src:/app/src
       - ./shared:/app/shared
     environment:
       NODE_ENV: development
       PORT: 3000
-      CORS_ORIGIN: http://localhost:5173,http://127.0.0.1:5173,http://devoq-ai.local
+      COUNT_ENGINE_MODE: real
+      COUNT_REAL_MODEL_VERSION: simple-vision-v1
+      AI_DETECTOR_MODE: baseline
+      AI_MODEL_VERSION: simple-vision-v1
+      AI_SERVICE_URL: http://devoq-ai-ai-service:8000
+      CORS_ORIGIN: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://devoq-ai.local
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.devoq-ai-backend-dev.rule=Host(`devoq-ai.local`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.devoq-ai-backend-dev.rule=Host(`api.devoq-ai.local`)"
       - "traefik.http.routers.devoq-ai-backend-dev.entrypoints=web"
       - "traefik.http.services.devoq-ai-backend-dev.loadbalancer.server.port=3000"
 
   frontend:
+    container_name: devoq-ai-frontend
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
     ports:
       - "5174:80"
+    depends_on:
+      - backend
     volumes:
+      - ./frontend/public:/app/public
       - ./frontend/src:/app/src
       - ./shared:/app/shared
-    environment:
-      VITE_API_URL: http://devoq-ai.local/api
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.devoq-ai-frontend-dev.rule=Host(`devoq-ai.local`)"
