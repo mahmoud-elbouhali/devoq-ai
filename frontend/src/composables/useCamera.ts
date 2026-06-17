@@ -66,6 +66,29 @@ export function useCamera() {
     status.value = "requesting-permission";
     console.info("[useCamera] requesting camera", { deviceId });
 
+    // Flaky USB webcams sometimes drop or refuse the device on the first try
+    // (NotReadableError, or an AbortError mid-attach when the device resets).
+    // Retry the whole acquire + attach sequence with a fresh stream each time.
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const fatal = await tryStartCamera(deviceId, attempt);
+      if (isStreaming.value) {
+        return;
+      }
+      if (fatal || attempt === maxAttempts) {
+        return;
+      }
+      console.warn(`[useCamera] start attempt ${attempt}/${maxAttempts} failed, retrying`);
+      status.value = `retrying:${attempt}`;
+      stopCamera();
+      // Give the browser / USB device time to fully release before reopening.
+      await delay(400 * attempt);
+    }
+  }
+
+  // Returns true when the failure is fatal (retrying won't help), false otherwise.
+  // On success it sets isStreaming.value = true.
+  async function tryStartCamera(deviceId: string | undefined, attempt: number): Promise<boolean> {
     let mediaStream: MediaStream;
     let attemptLabel = "unknown";
     try {
@@ -89,7 +112,8 @@ export function useCamera() {
       error.value = formatCameraError(name, message);
       status.value = name === "TimeoutError" ? "permission-timeout" : `error:${name}`;
       isStreaming.value = false;
-      return;
+      // Permission / missing device / impossible constraints won't be fixed by retrying.
+      return ["NotAllowedError", "SecurityError", "NotFoundError", "OverconstrainedError"].includes(name);
     }
 
     const tracks = mediaStream.getVideoTracks();
@@ -103,7 +127,7 @@ export function useCamera() {
       error.value = "Le flux ne contient aucune piste vidéo";
       status.value = "no-tracks";
       mediaStream.getTracks().forEach((t) => t.stop());
-      return;
+      return false;
     }
 
     stream.value = mediaStream;
@@ -147,7 +171,7 @@ export function useCamera() {
       mediaStream.getTracks().forEach((t) => t.stop());
       stream.value = null;
       isStreaming.value = false;
-      return;
+      return false;
     }
 
     isStreaming.value = true;
@@ -157,6 +181,7 @@ export function useCamera() {
     if (activeTrack) {
       selectedDeviceId.value = activeTrack.getSettings().deviceId || deviceId || selectedDeviceId.value;
     }
+    return false;
   }
 
   function stopCamera() {

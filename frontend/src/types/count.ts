@@ -61,3 +61,22 @@ export interface CountHistoryEntry {
   cameraLabel?: string;
   itemCode?: string;
 }
+
+export interface DatasetCapturePayload {
+  request_id: string;
+  image_base64: string;
+  session_name?: string;
+  notes?: string;
+  product_id?: number;
+  item_code?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DatasetCaptureResponse {
+  success: true;
+  capture_id: string;
+  session_name: string;
+  image_path: string;
+  metadata_path: string;
+  saved_at: string;
+}

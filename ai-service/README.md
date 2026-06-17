@@ -4,12 +4,12 @@ This service supports two detector modes controlled by `AI_DETECTOR_MODE`.
 
 ## Modes
 
-- `baseline`
-  - Current fallback for stable top-down scenes with dark objects on a light background.
-  - No trained model file required.
 - `yolox_onnx`
   - Loads a YOLOX model exported to ONNX.
   - Better suited for overlapping screws and true instance counting.
+- `baseline`
+  - Fallback for stable top-down scenes with dark objects on a light background.
+  - No trained model file required.
 
 ## Required YOLOX Environment Variables
 
@@ -43,18 +43,22 @@ Expected workflow:
 
 ## Development Activation
 
-To activate YOLOX in the current project for local testing:
+The default development stack now starts with YOLOX ONNX enabled.
+
+To run the current project in local development:
 
 1. Place a compatible ONNX file at `models/yolox.onnx`.
 2. Start the stack with:
 
    ```bash
-   make dev-yolox
+   make dev
    ```
 
 3. Check the backend info endpoint. The capabilities should include:
 
    - `detector:yolox_onnx`
+
+If you explicitly want the alternate compose profile that also enables YOLOX, `make dev-yolox` remains available.
 
 Important:
 

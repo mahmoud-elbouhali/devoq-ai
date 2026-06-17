@@ -1,6 +1,9 @@
 node_modules/
 dist/
 *.log
+
+# Reference datasets (volumineux, hors scope)
+Archive/
 .env
 .env.*
 !.env.example

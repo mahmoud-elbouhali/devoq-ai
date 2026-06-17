@@ -1,20 +1,11 @@
 import type { CountRequest, CountTestControls } from "../services/count/types.js";
-
-const DATA_URL_PREFIX = /^data:image\/(png|jpeg|jpg|webp);base64,/i;
-const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{6,120}$/;
-
-export interface ValidationIssue {
-  path: string;
-  message: string;
-}
-
-export type ValidationResult<T> =
-  | { success: true; data: T }
-  | { success: false; issues: ValidationIssue[] };
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+import {
+  isPlainObject,
+  REQUEST_ID_PATTERN,
+  type ValidationIssue,
+  type ValidationResult,
+  validateImageDataUrl,
+} from "./validationUtils.js";
 
 function validateTestControls(value: unknown, issues: ValidationIssue[]): CountTestControls | undefined {
   if (value === undefined) {
@@ -106,15 +97,7 @@ export function validateCountRequest(value: unknown): ValidationResult<CountRequ
     issues.push({ path: "item_code", message: "must be a non-empty string" });
   }
 
-  if (typeof imageBase64 !== "string" || !DATA_URL_PREFIX.test(imageBase64)) {
-    issues.push({ path: "image_base64", message: "must be a valid image data URL" });
-  } else {
-    const maxBytes = Number(process.env.COUNT_MAX_IMAGE_BYTES ?? 7_000_000);
-    const payloadBytes = Buffer.byteLength(imageBase64, "utf8");
-    if (payloadBytes > maxBytes) {
-      issues.push({ path: "image_base64", message: `image exceeds max size of ${maxBytes} bytes` });
-    }
-  }
+  validateImageDataUrl(imageBase64, issues);
 
   if (metadata !== undefined && !isPlainObject(metadata)) {
     issues.push({ path: "metadata", message: "must be an object" });

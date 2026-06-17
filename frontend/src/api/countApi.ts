@@ -3,6 +3,8 @@ import type {
   CountErrorResponse,
   CountRequestPayload,
   CountResponse,
+  DatasetCapturePayload,
+  DatasetCaptureResponse,
 } from "@/types/count";
 
 function getApiBaseUrl(): string {
@@ -42,6 +44,22 @@ export async function fetchEngineInfo(): Promise<CountEngineInfo> {
 
 export async function postCount(payload: CountRequestPayload): Promise<CountResponse> {
   const response = await fetch(`${getApiBaseUrl()}/v1/count`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    await parseError(response);
+  }
+
+  return response.json();
+}
+
+export async function postDatasetCapture(payload: DatasetCapturePayload): Promise<DatasetCaptureResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/v1/dataset/captures`, {
     method: "POST",
     headers: {
       "content-type": "application/json",

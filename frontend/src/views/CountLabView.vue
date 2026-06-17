@@ -1,18 +1,34 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { fetchEngineInfo, fetchHealth } from "@/api/countApi";
+import { fetchEngineInfo, fetchHealth, postDatasetCapture } from "@/api/countApi";
 import { useCamera } from "@/composables/useCamera";
 import { useLiveCount } from "@/composables/useLiveCount";
 import type { CountEngineInfo } from "@/types/count";
+
+function createClientRequestId(): string {
+  return `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createDefaultSessionName(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `camera-session-${year}${month}${day}`;
+}
 
 const productIdInput = ref("");
 const itemCode = ref("");
 const liveIntervalMs = ref(650);
 const engineInfo = ref<CountEngineInfo | null>(null);
 const healthStatus = ref<"idle" | "ok" | "error">("idle");
-const healthMessage = ref("Vérification du backend...");
+const healthMessage = ref("Verification du backend...");
 const capturedImage = ref<string | null>(null);
-const startClickCount = ref(0);
+const datasetSessionName = ref(createDefaultSessionName());
+const datasetNotes = ref("");
+const datasetSaveState = ref<"idle" | "saving" | "success" | "error">("idle");
+const datasetSaveMessage = ref("Aucune capture dataset sauvegardee pour le moment.");
+const datasetSavedCount = ref(0);
 
 const {
   videoRef,
@@ -32,18 +48,42 @@ const {
   state,
   result,
   error: countError,
-  history,
   lastFrame,
   isLoopRunning,
   countFrame,
   startLiveLoop,
   freezeLiveLoop,
   resetResults,
-  clearHistory,
 } = useLiveCount();
 
 const combinedError = computed(() => cameraError.value || countError.value || "");
 const activeImage = computed(() => capturedImage.value || lastFrame.value);
+const cameraStatusLabel = computed(() => {
+  if (cameraError.value) {
+    return cameraError.value;
+  }
+
+  const raw = cameraStatus.value;
+  if (raw.startsWith("error:NotReadableError")) {
+    return "Camera indisponible";
+  }
+  if (raw.startsWith("error:NotAllowedError")) {
+    return "Acces camera refuse";
+  }
+  if (raw === "idle" || raw === "stopped") {
+    return "en attente";
+  }
+  if (raw.startsWith("playing:")) {
+    return "camera active";
+  }
+  if (raw.startsWith("requesting")) {
+    return "demande d'acces camera";
+  }
+  if (raw === "permission-timeout") {
+    return "delai d'acces camera depasse";
+  }
+  return raw;
+});
 const formattedConfidence = computed(() => {
   if (!result.value) {
     return "0.0%";
@@ -59,7 +99,7 @@ const stateLabel = computed(() => {
     case "live":
       return "live";
     case "frozen":
-      return "figé";
+      return "gele";
     case "error":
       return "erreur";
     default:
@@ -78,14 +118,21 @@ const activeDetectorLabel = computed(() => {
   if (capabilities.includes("detector:baseline")) {
     return "baseline";
   }
-  return "Détecteur indisponible";
+  return "indisponible";
+});
+const canSaveDatasetCapture = computed(() => {
+  if (datasetSaveState.value === "saving") {
+    return false;
+  }
+
+  return Boolean(capturedImage.value || isStreaming.value);
 });
 
 async function refreshBackendStatus() {
   try {
     const [health, info] = await Promise.all([fetchHealth(), fetchEngineInfo()]);
     healthStatus.value = "ok";
-    healthMessage.value = `${health.service} est opérationnel`;
+    healthMessage.value = `${health.service} est operationnel`;
     engineInfo.value = info;
   } catch (error) {
     healthStatus.value = "error";
@@ -94,13 +141,6 @@ async function refreshBackendStatus() {
 }
 
 async function handleStartCamera() {
-  startClickCount.value += 1;
-  console.info("[CountLabView] handleStartCamera clicked", {
-    count: startClickCount.value,
-    selectedDeviceId: selectedDeviceId.value,
-    isSecureContext: window.isSecureContext,
-    hasMediaDevices: Boolean(navigator.mediaDevices?.getUserMedia),
-  });
   await startCamera(selectedDeviceId.value || undefined);
 }
 
@@ -153,6 +193,46 @@ function handleResetSession() {
   resetResults();
 }
 
+async function handleSaveDatasetCapture() {
+  const frame = capturedImage.value || captureFrame();
+  if (!frame) {
+    datasetSaveState.value = "error";
+    datasetSaveMessage.value = "Aucune image disponible pour le dataset. Lancez la camera ou capturez une image.";
+    return;
+  }
+
+  capturedImage.value = frame;
+  datasetSaveState.value = "saving";
+  datasetSaveMessage.value = "Enregistrement de la capture dataset...";
+
+  try {
+    const response = await postDatasetCapture({
+      request_id: createClientRequestId(),
+      image_base64: frame,
+      session_name: datasetSessionName.value || undefined,
+      notes: datasetNotes.value || undefined,
+      product_id: parsedProductId.value,
+      item_code: itemCode.value || undefined,
+      metadata: {
+        source: "devoq-ai-web",
+        camera_label: selectedCameraLabel.value,
+        captured_at: new Date().toISOString(),
+        flow: "dataset_capture",
+        detector: activeDetectorLabel.value,
+        previous_quantity: result.value?.quantity,
+        previous_confidence: result.value?.confidence,
+      },
+    });
+
+    datasetSavedCount.value += 1;
+    datasetSaveState.value = "success";
+    datasetSaveMessage.value = `Capture ${response.capture_id} enregistree dans ${response.image_path}`;
+  } catch (error) {
+    datasetSaveState.value = "error";
+    datasetSaveMessage.value = error instanceof Error ? error.message : "Impossible de sauvegarder la capture dataset";
+  }
+}
+
 onMounted(async () => {
   await refreshBackendStatus();
   await loadDevices();
@@ -160,43 +240,26 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="lab-shell">
-    <section class="hero-card">
-      <div>
-        <p class="eyebrow">Devoq-AI Vision Lab</p>
-        <h1>Laboratoire de comptage caméra pour le flux opérateur réel</h1>
-        <p class="hero-copy">
-          Démarrez la caméra, lancez un comptage en direct ou une capture unique,
-          puis vérifiez la quantité, la confiance et la latence avant l’intégration métier.
-        </p>
-      </div>
-      <div class="status-card" :data-state="healthStatus">
-        <span class="status-label">Backend</span>
-        <strong>{{ healthMessage }}</strong>
-        <span v-if="engineInfo" class="status-meta">
-          {{ engineInfo.model_version }} · {{ activeDetectorLabel }}
-        </span>
-      </div>
-    </section>
-
-    <section class="grid-layout">
-      <article class="panel">
-        <div class="panel-header">
+  <main class="screen">
+    <section class="workspace">
+      <article class="block controls-column">
+        <div class="block-head">
           <div>
-            <h2>Flux caméra</h2>
-            <p>Aperçu en direct et acquisition d’image depuis le navigateur.</p>
-          </div>
-          <div class="button-row">
-            <button class="ghost-button" @click="refreshBackendStatus">Actualiser le backend</button>
-            <button class="ghost-button" @click="loadDevices">Recharger les caméras</button>
+            <h2>Comptage</h2>
+            <p>Configurer la camera puis lancer un comptage.</p>
           </div>
         </div>
 
-        <div class="control-grid">
+        <div class="button-row">
+          <button class="secondary-button" @click="refreshBackendStatus">Actualiser</button>
+          <button class="secondary-button" @click="loadDevices">Recharger</button>
+        </div>
+
+        <div class="field-grid">
           <label>
-            <span>Caméra</span>
+            <span>Camera</span>
             <select v-model="selectedDeviceId">
-              <option value="" disabled>Sélectionner un périphérique</option>
+              <option value="" disabled>Selectionner un peripherique</option>
               <option v-for="device in devices" :key="device.deviceId" :value="device.deviceId">
                 {{ device.label }}
               </option>
@@ -214,245 +277,252 @@ onMounted(async () => {
           </label>
 
           <label>
-            <span>Intervalle live (ms)</span>
-            <input v-model.number="liveIntervalMs" type="number" min="300" step="50" />
+            <span>Intervalle live</span>
+            <input v-model.number="liveIntervalMs" type="number" min="300" step="50" placeholder="650" />
           </label>
         </div>
 
-        <div class="button-row action-row">
-          <button class="primary-button" @click="handleStartCamera">Démarrer la caméra</button>
-          <button class="ghost-button" :disabled="!isStreaming" @click="stopCamera">Arrêter la caméra</button>
-          <button class="ghost-button" :disabled="!isStreaming" @click="handleCapture">Capturer une image</button>
-          <button class="primary-button" :disabled="!isStreaming || isLoopRunning" @click="handleCountOnce">
+        <div class="button-row action-row controls-actions">
+          <button class="primary-button" @click="handleStartCamera">Demarrer camera</button>
+          <button class="secondary-button" :disabled="!isStreaming" @click="stopCamera">Arreter</button>
+          <button class="secondary-button" :disabled="!isStreaming" @click="handleCapture">Capturer</button>
+          <button class="secondary-button" :disabled="!isStreaming || isLoopRunning" @click="handleCountOnce">
             Compter une fois
           </button>
-          <button class="accent-button" :disabled="!isStreaming || isLoopRunning" @click="handleStartLive">
-            Démarrer le comptage live
+          <button class="secondary-button" :disabled="!isStreaming || isLoopRunning" @click="handleStartLive">
+            Demarrer live
           </button>
-          <button class="ghost-button" :disabled="!isLoopRunning" @click="handleFreeze">Geler</button>
+          <button class="secondary-button" :disabled="!isLoopRunning" @click="handleFreeze">Geler</button>
         </div>
 
-        <div class="video-frame">
-          <video ref="videoRef" autoplay playsinline muted></video>
-          <div v-if="!isStreaming" class="video-placeholder">
-            L’aperçu caméra apparaîtra ici après autorisation.
-          </div>
-          <div class="camera-status-pill">cam: {{ cameraStatus }} · clicks: {{ startClickCount }}</div>
-        </div>
-
-        <p v-if="combinedError" class="error-banner">{{ combinedError }}</p>
+        <p class="meta-line">etat camera {{ cameraStatusLabel }}</p>
+        <p v-if="combinedError" class="feedback error">{{ combinedError }}</p>
       </article>
 
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2>Session de comptage</h2>
-            <p>Capture unique ou boucle live avec le détecteur IA actif.</p>
+      <article class="block camera-column">
+        <div class="camera-stage">
+          <div class="frame camera-frame">
+            <video ref="videoRef" autoplay playsinline muted></video>
+            <div v-if="!isStreaming" class="frame-placeholder">
+              La camera apparaitra ici apres autorisation.
+            </div>
           </div>
-          <button class="ghost-button" @click="handleResetSession">Réinitialiser</button>
-        </div>
-
-        <div class="preview-box" :class="{ empty: !activeImage }">
-          <img v-if="activeImage" :src="activeImage" alt="Aperçu de l’image capturée" />
-          <span v-else>Capturez une image ou lancez la boucle live pour voir la dernière image analysée.</span>
-        </div>
-
-        <div class="metrics-grid">
-          <div class="metric-card">
-            <span>État</span>
-            <strong>{{ stateLabel }}</strong>
-          </div>
-          <div class="metric-card">
-            <span>Quantité</span>
-            <strong>{{ result?.quantity ?? "—" }}</strong>
-          </div>
-          <div class="metric-card">
-            <span>Confiance</span>
-            <strong>{{ formattedConfidence }}</strong>
-          </div>
-          <div class="metric-card">
-            <span>Latence</span>
-            <strong>{{ result?.inference_ms ?? "—" }} ms</strong>
-          </div>
-        </div>
-
-        <div class="warning-box" v-if="result?.warnings?.length">
-          <strong>Avertissements</strong>
-          <p v-for="warning in result.warnings" :key="warning">{{ warning }}</p>
         </div>
       </article>
-    </section>
 
-    <section class="grid-layout secondary">
-      <article class="panel">
-        <div class="panel-header compact">
-          <div>
-            <h2>Capacités du moteur</h2>
-            <p>Fonctionnalités annoncées par le backend actuel.</p>
-          </div>
-        </div>
-
-        <ul class="capabilities-list">
-          <li v-for="capability in engineInfo?.capabilities || []" :key="capability">
-            {{ capability }}
-          </li>
-        </ul>
-      </article>
-
-      <article class="panel">
-        <div class="panel-header compact">
-          <div>
-            <h2>Historique récent</h2>
-            <p>Stocké localement dans le navigateur.</p>
-          </div>
-          <button class="ghost-button" @click="clearHistory">Effacer</button>
-        </div>
-
-        <div v-if="history.length === 0" class="history-empty">
-          Aucun comptage enregistré pour le moment.
-        </div>
-
-        <ul v-else class="history-list">
-          <li v-for="entry in history" :key="entry.id">
+      <div class="side-column">
+        <article class="block">
+          <div class="block-head">
             <div>
-              <strong>{{ entry.quantity }} pièces</strong>
-              <span>{{ (entry.confidence * 100).toFixed(1) }}% de confiance</span>
+              <h2>Resultat</h2>
+              <p>Derniere image analysee et metriques du comptage.</p>
+            </div>
+            <button class="secondary-button" @click="handleResetSession">Reinitialiser</button>
+          </div>
+
+          <div class="frame preview" :class="{ empty: !activeImage }">
+            <img v-if="activeImage" :src="activeImage" alt="Apercu de l'image analysee" />
+            <span v-else>Capturez une image ou lancez le live.</span>
+          </div>
+
+          <dl class="metrics">
+            <div>
+              <dt>Etat</dt>
+              <dd>{{ stateLabel }}</dd>
             </div>
             <div>
-              <span>{{ entry.inferenceMs }} ms</span>
-              <span>{{ entry.itemCode || entry.cameraLabel || "capture" }}</span>
+              <dt>Quantite</dt>
+              <dd>{{ result?.quantity ?? "-" }}</dd>
             </div>
-          </li>
-        </ul>
-      </article>
+            <div>
+              <dt>Confiance</dt>
+              <dd>{{ formattedConfidence }}</dd>
+            </div>
+            <div>
+              <dt>Latence</dt>
+              <dd>{{ result?.inference_ms ?? "-" }} ms</dd>
+            </div>
+          </dl>
+
+          <div v-if="result?.warnings?.length" class="feedback">
+            <strong>Avertissements</strong>
+            <p v-for="warning in result.warnings" :key="warning">{{ warning }}</p>
+          </div>
+        </article>
+
+        <article class="block">
+          <div class="block-head">
+            <div>
+              <h2>Dataset</h2>
+              <p>Sauvegarder l'image courante pour annotation.</p>
+            </div>
+            <p class="counter">{{ datasetSavedCount }}</p>
+          </div>
+
+          <div class="dataset-fields">
+            <label>
+              <span>Session</span>
+              <input v-model="datasetSessionName" placeholder="camera-session-20260617" />
+            </label>
+
+            <label>
+              <span>Notes</span>
+              <input v-model="datasetNotes" placeholder="fond clair, ombre legere, 5 vis" />
+            </label>
+          </div>
+
+          <p class="meta-line">sauvegarde dans datasets/raw/captures/&lt;session&gt;/</p>
+
+          <div class="button-row action-row">
+            <button class="primary-button" :disabled="!canSaveDatasetCapture" @click="handleSaveDatasetCapture">
+              Sauver au dataset
+            </button>
+          </div>
+
+          <p class="feedback" :data-state="datasetSaveState">
+            {{ datasetSaveMessage }}
+          </p>
+        </article>
+      </div>
     </section>
   </main>
 </template>
 
 <style scoped>
-.lab-shell {
+.screen {
   min-height: 100vh;
-  padding: 2rem;
-  color: #f5f3ef;
-  background:
-    radial-gradient(circle at top left, rgba(230, 149, 53, 0.18), transparent 28%),
-    radial-gradient(circle at top right, rgba(27, 87, 128, 0.24), transparent 32%),
-    linear-gradient(145deg, #171411 0%, #22211f 48%, #111827 100%);
+  padding: 1rem;
+  color: #111111;
+  background: #ffffff;
+  font-family: "Helvetica Neue", Arial, sans-serif;
 }
 
-.hero-card,
-.panel {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 24px;
-  background: rgba(17, 24, 39, 0.55);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.22);
-  backdrop-filter: blur(16px);
-}
-
-.hero-card {
-  display: grid;
-  grid-template-columns: 1.8fr 1fr;
-  gap: 1.5rem;
-  padding: 2rem;
-  margin-bottom: 1.5rem;
-}
-
-.eyebrow {
-  margin: 0 0 0.5rem;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: #fbbf24;
-  font-size: 0.82rem;
+h1,
+h2,
+dt,
+dd,
+strong,
+.counter {
+  margin: 0;
 }
 
 h1 {
-  margin: 0;
-  font-size: clamp(2.2rem, 4vw, 4.4rem);
-  line-height: 0.95;
-  font-weight: 800;
+  max-width: 24rem;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  font-weight: 600;
 }
 
-.hero-copy,
-.panel-header p,
-.status-meta,
-.history-empty,
-.preview-box span,
-.warning-box p {
-  color: rgba(241, 245, 249, 0.72);
+h2 {
+  font-size: 1.15rem;
+  line-height: 1.2;
+  font-weight: 600;
 }
 
-.status-card {
+.block-head p,
+.meta-line,
+.frame-placeholder,
+.preview span,
+.feedback p,
+label span,
+input::placeholder {
+  color: #666666;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.85fr) minmax(0, 1.7fr) minmax(20rem, 0.95fr);
+  column-gap: 0.6rem;
+  row-gap: 1rem;
+  align-items: start;
+}
+
+.controls-column {
   display: flex;
   flex-direction: column;
+  gap: 0.75rem;
+}
+
+.camera-column {
+  display: flex;
+  align-items: center;
   justify-content: center;
-  gap: 0.4rem;
-  padding: 1.2rem;
-  border-radius: 18px;
-  background: rgba(15, 23, 42, 0.72);
 }
 
-.status-card[data-state="ok"] {
-  border: 1px solid rgba(74, 222, 128, 0.3);
-}
-
-.status-card[data-state="error"] {
-  border: 1px solid rgba(248, 113, 113, 0.4);
-}
-
-.status-label {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: #fbbf24;
-}
-
-.grid-layout {
+.side-column {
   display: grid;
-  grid-template-columns: 1.35fr 1fr;
-  gap: 1.5rem;
+  gap: 0.3rem;
 }
 
-.grid-layout.secondary {
-  margin-top: 1.5rem;
+.block {
+  border: 1px solid #d9d9d9;
+  padding: 0.5rem;
+  background: #ffffff;
 }
 
-.panel {
-  padding: 1.5rem;
-}
-
-.panel-header {
+.block-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
-.panel-header.compact h2,
-.panel-header.compact h3,
-.panel-header h2 {
+.compact-head {
+  align-items: center;
+}
+
+.head-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.block-head p {
   margin: 0;
+  line-height: 1.4;
 }
 
-.panel-header p {
-  margin: 0.25rem 0 0;
+.compact-head .block-head p,
+.head-line p {
+  white-space: nowrap;
 }
 
-.control-grid {
+.field-grid,
+.dataset-fields {
   display: grid;
+  gap: 0.75rem;
+}
+
+.camera-stage {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.field-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.9rem;
+}
+
+.controls-column .field-grid {
+  grid-template-columns: 1fr;
+}
+
+.controls-actions {
+  flex-direction: column;
+}
+
+.controls-actions button {
+  width: 100%;
 }
 
 label {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  font-size: 0.92rem;
-}
-
-label span {
-  color: rgba(255, 255, 255, 0.8);
+  gap: 0.4rem;
+  font-size: 0.88rem;
 }
 
 input,
@@ -463,23 +533,19 @@ button {
 
 input,
 select {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
-  padding: 0.82rem 0.9rem;
-  color: #f8fafc;
-  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid #d0d0d0;
+  border-radius: 0;
+  padding: 0.8rem 0.9rem;
+  color: #111111;
+  background: #ffffff;
 }
 
 button {
-  border: 0;
-  border-radius: 999px;
-  padding: 0.8rem 1.15rem;
+  border: 1px solid #111111;
+  border-radius: 0;
+  padding: 0.65rem 0.85rem;
   cursor: pointer;
-  transition: transform 140ms ease, opacity 140ms ease, background 140ms ease;
-}
-
-button:hover:not(:disabled) {
-  transform: translateY(-1px);
+  transition: background 140ms ease, color 140ms ease, opacity 140ms ease;
 }
 
 button:disabled {
@@ -490,43 +556,37 @@ button:disabled {
 .button-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.45rem;
 }
 
 .action-row {
-  margin: 1.1rem 0;
+  margin: 0.75rem 0;
 }
 
 .primary-button {
-  color: #111827;
-  background: linear-gradient(135deg, #f59e0b, #facc15);
+  color: #ffffff;
+  background: #111111;
 }
 
-.accent-button {
-  color: #e2e8f0;
-  background: linear-gradient(135deg, #0f766e, #14b8a6);
+.secondary-button {
+  color: #111111;
+  background: #ffffff;
 }
 
-.ghost-button {
-  color: #f8fafc;
-  background: rgba(255, 255, 255, 0.08);
+.primary-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled) {
+  color: #ffffff;
+  background: #111111;
 }
 
-.video-frame,
-.preview-box {
+.frame {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 22px;
-  background: rgba(2, 6, 23, 0.88);
+  border: 1px solid #d9d9d9;
+  background: #ffffff;
 }
 
-.video-frame {
-  aspect-ratio: 16 / 10;
-  min-height: 240px;
-}
-
-.video-frame video {
+.frame video {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -536,127 +596,129 @@ button:disabled {
   background: #000;
 }
 
-.preview-box img {
+.frame,
+.preview {
+  min-height: 22rem;
+}
+
+.camera-frame {
+  width: 100%;
+  max-width: 36rem;
+  min-height: 0;
+}
+
+.camera-frame::before {
+  content: "";
+  display: block;
+  padding-top: 100%;
+}
+
+.camera-frame .frame-placeholder {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+
+.preview {
+  margin-bottom: 0.5rem;
+}
+
+.preview img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.video-placeholder {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-}
-
-.camera-status-pill {
-  position: absolute;
-  top: 0.6rem;
-  left: 0.6rem;
-  z-index: 2;
-  padding: 0.3rem 0.7rem;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.85);
-  border: 1px solid rgba(251, 191, 36, 0.4);
-  color: #fbbf24;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 0.78rem;
-  pointer-events: none;
-}
-
-.video-placeholder,
-.preview-box.empty {
+.frame-placeholder,
+.preview.empty {
   display: grid;
   place-items: center;
-  min-height: 240px;
+  min-height: 22rem;
   padding: 1rem;
   text-align: center;
-  color: rgba(226, 232, 240, 0.66);
 }
 
-.preview-box {
-  min-height: 240px;
-  margin-bottom: 1rem;
+.meta-line {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
 }
 
-.metrics-grid {
+.metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.8rem;
-  margin-bottom: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: #d9d9d9;
+  border: 1px solid #d9d9d9;
 }
 
-.metric-card {
-  padding: 1rem;
-  border-radius: 18px;
-  background: rgba(30, 41, 59, 0.78);
+.metrics div {
+  padding: 0.9rem;
+  background: #ffffff;
 }
 
-.metric-card span {
-  display: block;
-  color: rgba(226, 232, 240, 0.72);
-  font-size: 0.84rem;
+dt {
+  color: #666666;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.metric-card strong {
+dd {
   display: block;
   margin-top: 0.35rem;
-  font-size: 1.6rem;
+  color: #111111;
+  font-size: 1.25rem;
+  line-height: 1.1;
 }
 
-.warning-box,
-.error-banner {
+.feedback {
   margin-top: 1rem;
-  padding: 1rem;
-  border-radius: 18px;
-  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid #d9d9d9;
+  padding: 0.9rem;
+  line-height: 1.6;
+  color: #111111;
 }
 
-.error-banner {
-  color: #fecaca;
-  border: 1px solid rgba(248, 113, 113, 0.3);
+.feedback[data-state="error"],
+.feedback.error {
+  border-color: #bdbdbd;
 }
 
-.capabilities-list,
-.history-list {
-  display: grid;
-  gap: 0.8rem;
-  padding: 0;
-  margin: 0;
-  list-style: none;
+.counter {
+  color: #111111;
+  font-size: 1.4rem;
+  line-height: 1;
+  font-weight: 600;
 }
 
-.capabilities-list li,
-.history-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.95rem 1rem;
-  border-radius: 16px;
-  background: rgba(15, 23, 42, 0.72);
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
 }
 
-.history-list strong {
-  display: block;
-}
-
-.history-list span {
-  display: block;
-  color: rgba(226, 232, 240, 0.7);
-  font-size: 0.88rem;
-}
-
-@media (max-width: 960px) {
-  .lab-shell {
+@media (max-width: 760px) {
+  .screen {
     padding: 1rem;
   }
 
-  .hero-card,
-  .grid-layout {
-    grid-template-columns: 1fr;
+  .head-line {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
   }
 
-  .control-grid,
-  .metrics-grid {
+  .head-line p {
+    white-space: normal;
+  }
+
+  h1 {
+    font-size: 1.35rem;
+  }
+
+  .field-grid,
+  .metrics {
     grid-template-columns: 1fr;
   }
 }

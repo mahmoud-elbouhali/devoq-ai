@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { createCountRoutes } from "./routes/countRoutes.js";
+import { createDatasetRoutes } from "./routes/datasetRoutes.js";
 import { createCountEngine } from "./services/count/createCountEngine.js";
 
 const app = express();
@@ -20,5 +21,6 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/v1", createCountRoutes(countEngine));
+app.use("/v1/dataset", createDatasetRoutes());
 
 export default app;

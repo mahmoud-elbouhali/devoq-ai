@@ -41,7 +41,7 @@ devoq-ai/
 ### Development
 
 ```bash
-# Start the development environment
+# Start the development environment with the real YOLOX ONNX detector
 make dev
 
 # View logs
@@ -87,26 +87,28 @@ make stop
 
 ## Current Counting Strategy
 
-The repository now includes a real counting microservice intended for stable top-down views with dark objects on a light background. It performs:
+The default development stack now runs the real `yolox_onnx` detector path through the AI microservice.
+
+The repository also still includes a simpler baseline detector intended for stable top-down views with dark objects on a light background. It performs:
 
 - image decoding from data URL
 - grayscale thresholding
 - simple morphology
 - connected-component counting
 
-This is a usable baseline for the current hardware setup and keeps the architecture ready for a later YOLOX-based detector behind the same API contract.
+This baseline remains available as a fallback and troubleshooting path, but it is no longer the main development default.
 
 ## YOLOX Integration Path
 
 The AI microservice now supports two detector modes selected with `AI_DETECTOR_MODE`:
 
-- `baseline`: current connected-components fallback for simple controlled scenes
-- `yolox_onnx`: ONNX Runtime inference for a trained YOLOX model
+- `yolox_onnx`: ONNX Runtime inference for a trained or mounted YOLOX model
+- `baseline`: connected-components fallback for simple controlled scenes
 
 For `yolox_onnx`, provide at least:
 
 - `AI_YOLOX_MODEL_PATH=/models/yolox.onnx`
-- `AI_MODEL_VERSION=yolox-screws-v1`
+- `AI_MODEL_VERSION=yolox-screws-v1` or the version name of the mounted runtime model
 - `AI_YOLOX_CLASS_NAMES=screw`
 - `AI_YOLOX_TARGET_CLASSES=screw`
 
