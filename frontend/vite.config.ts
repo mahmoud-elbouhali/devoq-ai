@@ -21,7 +21,7 @@ export default defineConfig({
     hmr: false,
     proxy: {
       '/api': {
-        target: 'http://devoq-ai-backend:3000',
+        target: process.env.VITE_API_TARGET || 'http://devoq-ai-backend:3000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },

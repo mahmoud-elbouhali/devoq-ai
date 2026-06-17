@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { fetchEngineInfo, fetchHealth, postDatasetCapture } from "@/api/countApi";
 import { useCamera } from "@/composables/useCamera";
 import { useLiveCount } from "@/composables/useLiveCount";
@@ -29,6 +29,10 @@ const datasetNotes = ref("");
 const datasetSaveState = ref<"idle" | "saving" | "success" | "error">("idle");
 const datasetSaveMessage = ref("Aucune capture dataset sauvegardee pour le moment.");
 const datasetSavedCount = ref(0);
+const showMetrics = ref(false);
+const autoCapture = ref(false);
+const AUTO_CAPTURE_INTERVAL_MS = 2000;
+let autoCaptureTimer: ReturnType<typeof setInterval> | null = null;
 
 const {
   videoRef,
@@ -194,7 +198,8 @@ function handleResetSession() {
 }
 
 async function handleSaveDatasetCapture() {
-  const frame = capturedImage.value || captureFrame();
+  // Un seul clic = capture fraiche (si la camera tourne) + sauvegarde dataset.
+  const frame = isStreaming.value ? captureFrame() : capturedImage.value;
   if (!frame) {
     datasetSaveState.value = "error";
     datasetSaveMessage.value = "Aucune image disponible pour le dataset. Lancez la camera ou capturez une image.";
@@ -232,6 +237,36 @@ async function handleSaveDatasetCapture() {
     datasetSaveMessage.value = error instanceof Error ? error.message : "Impossible de sauvegarder la capture dataset";
   }
 }
+
+function stopAutoCapture() {
+  if (autoCaptureTimer !== null) {
+    clearInterval(autoCaptureTimer);
+    autoCaptureTimer = null;
+  }
+}
+
+function startAutoCapture() {
+  stopAutoCapture();
+  autoCaptureTimer = setInterval(() => {
+    // ne capture que si la camera tourne et qu'aucune sauvegarde n'est en cours
+    if (!isStreaming.value || datasetSaveState.value === "saving") {
+      return;
+    }
+    void handleSaveDatasetCapture();
+  }, AUTO_CAPTURE_INTERVAL_MS);
+}
+
+watch(autoCapture, (enabled) => {
+  if (enabled) {
+    startAutoCapture();
+  } else {
+    stopAutoCapture();
+  }
+});
+
+onBeforeUnmount(() => {
+  stopAutoCapture();
+});
 
 onMounted(async () => {
   await refreshBackendStatus();
@@ -308,6 +343,38 @@ onMounted(async () => {
             </div>
           </div>
         </div>
+
+        <div class="metrics-panel">
+          <button class="secondary-button toggle-metrics" @click="showMetrics = !showMetrics">
+            {{ showMetrics ? "Masquer les metriques" : "Afficher les metriques" }}
+          </button>
+
+          <template v-if="showMetrics">
+            <dl class="metrics">
+              <div>
+                <dt>Etat</dt>
+                <dd>{{ stateLabel }}</dd>
+              </div>
+              <div>
+                <dt>Quantite</dt>
+                <dd>{{ result?.quantity ?? "-" }}</dd>
+              </div>
+              <div>
+                <dt>Confiance</dt>
+                <dd>{{ formattedConfidence }}</dd>
+              </div>
+              <div>
+                <dt>Latence</dt>
+                <dd>{{ result?.inference_ms ?? "-" }} ms</dd>
+              </div>
+            </dl>
+
+            <div v-if="result?.warnings?.length" class="feedback">
+              <strong>Avertissements</strong>
+              <p v-for="warning in result.warnings" :key="warning">{{ warning }}</p>
+            </div>
+          </template>
+        </div>
       </article>
 
       <div class="side-column">
@@ -323,30 +390,6 @@ onMounted(async () => {
           <div class="frame preview" :class="{ empty: !activeImage }">
             <img v-if="activeImage" :src="activeImage" alt="Apercu de l'image analysee" />
             <span v-else>Capturez une image ou lancez le live.</span>
-          </div>
-
-          <dl class="metrics">
-            <div>
-              <dt>Etat</dt>
-              <dd>{{ stateLabel }}</dd>
-            </div>
-            <div>
-              <dt>Quantite</dt>
-              <dd>{{ result?.quantity ?? "-" }}</dd>
-            </div>
-            <div>
-              <dt>Confiance</dt>
-              <dd>{{ formattedConfidence }}</dd>
-            </div>
-            <div>
-              <dt>Latence</dt>
-              <dd>{{ result?.inference_ms ?? "-" }} ms</dd>
-            </div>
-          </dl>
-
-          <div v-if="result?.warnings?.length" class="feedback">
-            <strong>Avertissements</strong>
-            <p v-for="warning in result.warnings" :key="warning">{{ warning }}</p>
           </div>
         </article>
 
@@ -373,10 +416,14 @@ onMounted(async () => {
 
           <p class="meta-line">sauvegarde dans datasets/raw/captures/&lt;session&gt;/</p>
 
-          <div class="button-row action-row">
+          <div class="button-row action-row capture-row">
             <button class="primary-button" :disabled="!canSaveDatasetCapture" @click="handleSaveDatasetCapture">
-              Sauver au dataset
+              Capturer et sauver au dataset
             </button>
+            <label class="auto-capture" :class="{ active: autoCapture }">
+              <input type="checkbox" v-model="autoCapture" />
+              <span>Capture auto (2s)</span>
+            </label>
           </div>
 
           <p class="feedback" :data-state="datasetSaveState">
@@ -446,8 +493,48 @@ input::placeholder {
 
 .camera-column {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 0.75rem;
+}
+
+.metrics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 36rem;
+}
+
+.toggle-metrics {
+  align-self: flex-start;
+}
+
+.capture-row {
+  align-items: center;
+}
+
+.auto-capture {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid #d0d0d0;
+  padding: 0.55rem 0.7rem;
+}
+
+.auto-capture.active {
+  border-color: #111111;
+}
+
+.auto-capture input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border-radius: 0;
+  cursor: pointer;
 }
 
 .side-column {
