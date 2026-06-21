@@ -4,6 +4,11 @@ dist/
 
 # Reference datasets (volumineux, hors scope)
 Archive/
+datasets/raw/captures/
+datasets/raw/annotated/*.jpg
+datasets/raw/annotated/*.jpeg
+datasets/raw/annotated/*.png
+datasets/processed/images/
 .env
 .env.*
 !.env.example
