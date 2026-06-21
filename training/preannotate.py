@@ -2,13 +2,12 @@
 """Pre-annotation des vis pour accelerer l'etiquetage manuel.
 
 Genere des labels au format YOLO (un .txt par image) a partir d'un detecteur
-classique simple (seuil + composantes connexes), repliquant la logique du
-detecteur `baseline` du microservice IA.
+classique simple (seuil + composantes connexes) pour accelerer l'annotation
+manuelle avant entrainement YOLOX.
 
-ATTENTION : ces annotations sont un POINT DE DEPART imparfait (le baseline
-sous-compte les vis qui se touchent et gere mal les fonds non uniformes).
-Elles doivent etre corrigees a la main dans un outil d'annotation
-(labelImg, Label Studio, Roboflow...) avant l'entrainement.
+ATTENTION : ces annotations sont un POINT DE DEPART imparfait. Elles doivent
+etre corrigees a la main dans un outil d'annotation (labelImg) avant
+l'entrainement du modele YOLOX.
 
 Format YOLO d'une ligne : `<class_id> <cx> <cy> <w> <h>` (valeurs normalisees 0-1).
 Une seule classe ici : screw -> class_id = 0.
@@ -27,10 +26,16 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-# --- Parametres du detecteur baseline (alignes sur ai-service/app/config.py) ---
+# --- Parametres du detecteur de pre-annotation ---
 THRESHOLD_OFFSET = 35
 MIN_COMPONENT_AREA = 20
 MAX_COMPONENT_AREA = 120000
+
+# --- Filtres de taille relative a l'image ---
+# Une vis fait au moins 1.5% et au plus 30% de la largeur/hauteur de l'image.
+# Elimine les grands rectangles (fond detecte) et le bruit pixel.
+MIN_BOX_RATIO = 0.015   # 1.5% de la dimension image minimum
+MAX_BOX_RATIO = 0.30    # 30% de la dimension image maximum
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
@@ -55,7 +60,7 @@ def _morph(mask: np.ndarray, op: str, pad_value: bool) -> np.ndarray:
 
 
 def refine_mask(mask: np.ndarray) -> np.ndarray:
-    # ouverture puis fermeture, comme le detecteur baseline
+    # ouverture puis fermeture pour nettoyer le masque binaire
     opened = _morph(_morph(mask, "erode", True), "dilate", False)
     return _morph(_morph(opened, "dilate", False), "erode", True)
 
@@ -91,6 +96,11 @@ def connected_components(mask: np.ndarray) -> list[tuple[int, int, int, int, int
 
 def detect_boxes(image: np.ndarray) -> list[tuple[int, int, int, int]]:
     """Retourne une liste de boites (x, y, w, h) en pixels."""
+    img_h, img_w = image.shape[:2]
+    min_dim = max(5, int(min(img_w, img_h) * MIN_BOX_RATIO))
+    max_w = int(img_w * MAX_BOX_RATIO)
+    max_h = int(img_h * MAX_BOX_RATIO)
+
     gray = rgb_to_gray(image)
     background_level = int(np.percentile(gray, 92))
     candidate_threshold = max(0, background_level - THRESHOLD_OFFSET)
@@ -106,7 +116,9 @@ def detect_boxes(image: np.ndarray) -> list[tuple[int, int, int, int]]:
             continue
         w = max_x - min_x + 1
         h = max_y - min_y + 1
-        if w < 3 or h < 3:
+        if w < min_dim or h < min_dim:       # trop petit = bruit pixel
+            continue
+        if w > max_w or h > max_h:           # trop grand = fausse detection (fond)
             continue
         boxes.append((min_x, min_y, w, h))
     return boxes
@@ -130,7 +142,7 @@ def iter_images(root: Path):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Pre-annotation YOLO des vis (baseline).")
+    parser = argparse.ArgumentParser(description="Pre-annotation YOLO des vis pour entrainement YOLOX.")
     parser.add_argument("--images", required=True, help="Dossier contenant les images (recursif).")
     parser.add_argument(
         "--out",

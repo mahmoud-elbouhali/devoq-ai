@@ -1,4 +1,4 @@
-.PHONY: help dev dev-yolox prod build stop logs ps health clean clean-all
+.PHONY: help dev dev-yolox prod build stop logs ps health clean clean-all annoter labelimg preparer
 
 COMPOSE_DEV  := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_DEV_YOLOX := docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.yolox.dev.yml
@@ -40,3 +40,14 @@ clean: ## Stop and remove volumes
 clean-all: ## Stop, remove volumes and images
 	$(COMPOSE_DEV) down -v
 	docker rmi devoq-ai-backend devoq-ai-frontend 2>/dev/null || true
+
+# ── Pipeline d'entraînement local (sans Docker) ──────────────────────────────
+
+annoter: ## Pre-annoter les captures (genere les .txt YOLO dans datasets/raw/annotated)
+	python3 training/preannotate.py --images datasets/raw/captures --out datasets/raw/annotated --copy-images
+
+labelimg: ## Ouvrir labelImg sur les annotations pour correction manuelle
+	labelImg datasets/raw/annotated datasets/raw/annotated/classes.txt
+
+preparer: ## Assembler le dataset train/val/test (apres correction dans labelImg)
+	python3 training/prepare_dataset.py --src datasets/raw/annotated --clean
