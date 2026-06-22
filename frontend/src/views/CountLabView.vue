@@ -31,7 +31,7 @@ const datasetSaveMessage = ref("Aucune capture dataset sauvegardee pour le momen
 const datasetSavedCount = ref(0);
 const showMetrics = ref(false);
 const autoCapture = ref(false);
-const AUTO_CAPTURE_INTERVAL_MS = 2000;
+const AUTO_CAPTURE_INTERVAL_MS = 3000;
 let autoCaptureTimer: ReturnType<typeof setInterval> | null = null;
 
 const {
@@ -422,7 +422,7 @@ onMounted(async () => {
             </button>
             <label class="auto-capture" :class="{ active: autoCapture }">
               <input type="checkbox" v-model="autoCapture" />
-              <span>Capture auto (2s)</span>
+              <span>Capture auto (3s)</span>
             </label>
           </div>
 

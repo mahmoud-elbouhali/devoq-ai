@@ -1,4 +1,4 @@
-.PHONY: help dev dev-yolox prod build stop logs ps health clean clean-all annoter labelimg preparer
+.PHONY: help dev dev-yolox prod build stop logs ps health clean clean-all annoter reannoter labelimg preparer
 
 COMPOSE_DEV  := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_DEV_YOLOX := docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.yolox.dev.yml
@@ -45,6 +45,9 @@ clean-all: ## Stop, remove volumes and images
 
 annoter: ## Pre-annoter les captures (genere les .txt YOLO dans datasets/raw/annotated)
 	python3 training/preannotate.py --images datasets/raw/captures --out datasets/raw/annotated --copy-images
+
+reannoter: ## Regenerer toutes les pre-annotations (ecrase les .txt existants)
+	python3 training/preannotate.py --images datasets/raw/captures --out datasets/raw/annotated --copy-images --overwrite --detector opencv --min-box-ratio 0.02 --max-box-ratio 0.25 --edge-margin-ratio 0.02
 
 labelimg: ## Ouvrir labelImg sur les annotations pour correction manuelle
 	labelImg datasets/raw/annotated datasets/raw/annotated/classes.txt
