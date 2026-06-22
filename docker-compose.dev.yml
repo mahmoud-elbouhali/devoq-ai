@@ -10,7 +10,7 @@ services:
       - ./models:/models:ro
     environment:
       AI_DETECTOR_MODE: yolox_onnx
-      AI_MODEL_VERSION: yolox-s-coco-official
+      AI_MODEL_VERSION: screw-yolox-local-5epoch
       AI_YOLOX_MODEL_PATH: /models/yolox.onnx
       AI_YOLOX_CLASS_NAMES: screw
       AI_YOLOX_TARGET_CLASSES: screw
@@ -40,9 +40,9 @@ services:
       NODE_ENV: development
       PORT: 3000
       COUNT_ENGINE_MODE: real
-      COUNT_REAL_MODEL_VERSION: yolox-s-coco-official
+      COUNT_REAL_MODEL_VERSION: screw-yolox-local-5epoch
       AI_DETECTOR_MODE: yolox_onnx
-      AI_MODEL_VERSION: yolox-s-coco-official
+      AI_MODEL_VERSION: screw-yolox-local-5epoch
       AI_SERVICE_URL: http://devoq-ai-ai-service:8000
       DATASET_CAPTURE_DIR: /datasets/raw/captures
       CORS_ORIGIN: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://devoq-ai.local

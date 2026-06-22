@@ -7,8 +7,8 @@ services:
     volumes:
       - ./models:/models:ro
     environment:
-      AI_DETECTOR_MODE: baseline
-      AI_MODEL_VERSION: simple-vision-v1
+      AI_DETECTOR_MODE: yolox_onnx
+      AI_MODEL_VERSION: screw-yolox-v1
       AI_YOLOX_MODEL_PATH: /models/yolox.onnx
       AI_YOLOX_CLASS_NAMES: screw
       AI_YOLOX_TARGET_CLASSES: screw
@@ -32,9 +32,9 @@ services:
       NODE_ENV: production
       PORT: 3000
       COUNT_ENGINE_MODE: real
-      COUNT_REAL_MODEL_VERSION: simple-vision-v1
-      AI_DETECTOR_MODE: baseline
-      AI_MODEL_VERSION: simple-vision-v1
+      COUNT_REAL_MODEL_VERSION: screw-yolox-v1
+      AI_DETECTOR_MODE: yolox_onnx
+      AI_MODEL_VERSION: screw-yolox-v1
       AI_SERVICE_URL: http://devoq-ai-ai-service:8000
       CORS_ORIGIN: https://devoq-ai.com
       JWT_SECRET: ${JWT_SECRET}

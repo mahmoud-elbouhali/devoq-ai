@@ -29,11 +29,6 @@ def env_list(name: str) -> list[str]:
 DETECTOR_MODE = os.getenv("AI_DETECTOR_MODE", "yolox_onnx").strip().lower()
 MODEL_VERSION = os.getenv("AI_MODEL_VERSION", "screw-yolox-v1")
 
-THRESHOLD_OFFSET = env_int("AI_THRESHOLD_OFFSET", 35)
-MIN_COMPONENT_AREA = env_int("AI_MIN_COMPONENT_AREA", 20)
-MAX_COMPONENT_AREA = env_int("AI_MAX_COMPONENT_AREA", 120000)
-CONFIDENCE_BASE = env_float("AI_CONFIDENCE_BASE", 0.86)
-
 YOLOX_MODEL_PATH = os.getenv("AI_YOLOX_MODEL_PATH", "../models/yolox.onnx")
 YOLOX_INPUT_SIZE = env_int("AI_YOLOX_INPUT_SIZE", 640)
 YOLOX_CONFIDENCE_THRESHOLD = env_float("AI_YOLOX_CONFIDENCE_THRESHOLD", 0.35)

@@ -1,15 +1,12 @@
 # AI Service
 
-This service supports two detector modes controlled by `AI_DETECTOR_MODE`.
+This service runs a single detector: `yolox_onnx` (set via `AI_DETECTOR_MODE`).
 
-## Modes
+## Detector
 
 - `yolox_onnx`
   - Loads a YOLOX model exported to ONNX.
-  - Better suited for overlapping screws and true instance counting.
-- `baseline`
-  - Fallback for stable top-down scenes with dark objects on a light background.
-  - No trained model file required.
+  - Suited for overlapping screws and true instance counting.
 
 ## Required YOLOX Environment Variables
 
@@ -33,7 +30,7 @@ Expected workflow:
 1. Train YOLOX on your annotated screw dataset.
 2. Export the trained model to ONNX.
 3. Mount the ONNX file into the container, typically under `/models/yolox.onnx`.
-4. Switch `AI_DETECTOR_MODE` from `baseline` to `yolox_onnx`.
+4. Keep `AI_DETECTOR_MODE=yolox_onnx` (the only supported mode).
 
 ## Notes
 

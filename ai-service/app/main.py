@@ -3,7 +3,6 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from app import config
 from app.detectors import create_detector
 from app.image_utils import decode_data_url
 from app.schemas import CountRequest, CountResult, ServiceInfo
@@ -72,8 +71,6 @@ def count(payload: CountRequest) -> CountResult:
         warnings.append("Low confidence result: operator confirmation recommended.")
     if quantity == 0:
         warnings.append("No object detected in the current frame.")
-    if config.DETECTOR_MODE == "baseline":
-        warnings.append("Baseline detector active: overlapping objects may be merged.")
 
     inference_ms = controls.force_latency_ms if controls and controls.force_latency_ms is not None else result.inference_ms
 

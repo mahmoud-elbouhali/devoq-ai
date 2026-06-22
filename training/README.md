@@ -1,9 +1,8 @@
 # Entrainement d'un detecteur de vis (YOLOX) pour Devoq AI
 
-Ce dossier contient le pipeline pour remplacer le detecteur `baseline` (vision
-classique, qui sous-compte les vis qui se touchent) par un vrai modele YOLOX
-entraine specifiquement sur des vis, exporte en ONNX et branche sur le
-microservice IA en mode `yolox_onnx`.
+Ce dossier contient le pipeline pour produire le modele YOLOX du microservice IA :
+un modele entraine specifiquement sur des vis, exporte en ONNX et branche sur le
+microservice IA en mode `yolox_onnx` (le seul detecteur du projet).
 
 ## Vue d'ensemble
 
@@ -30,7 +29,7 @@ eclairage et distance. La diversite fait la qualite du modele.
 
 ## 2. Pre-annoter (gain de temps)
 
-Genere des boites de depart (imparfaites) a partir du detecteur classique :
+Genere des boites de depart (imparfaites) a partir d'une heuristique vision (morphologie) :
 
 ```powershell
 python training/preannotate.py --images datasets/raw/captures --out datasets/raw/annotated --copy-images
@@ -41,7 +40,7 @@ fichier `.txt` au format YOLO (`<class> <cx> <cy> <w> <h>` normalises, classe `0
 
 ## 3. Corriger les annotations
 
-Les pre-annotations sont un POINT DE DEPART : le baseline rate des vis et en
+Les pre-annotations sont un POINT DE DEPART : l'heuristique rate des vis et en
 fusionne. Corrige-les a la main. Outils gratuits recommandes :
 
 - **labelImg** (`pip install labelImg`) : simple, mode YOLO, ouvre directement
@@ -101,11 +100,9 @@ attendu par `ai-service/app/detectors/yolox_onnx.py`. Entree : `[1, 3, 640, 640]
    python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
    ```
 
-   Le backend, lui, tourne deja avec `AI_DETECTOR_MODE=baseline` dans son info,
-   mais il ne fait que relayer vers l'ai-service : c'est bien le mode de
-   l'**ai-service** qui determine le detecteur utilise. (Pour l'affichage, tu
-   peux aussi relancer le backend avec `AI_DETECTOR_MODE=yolox_onnx` et
-   `COUNT_REAL_MODEL_VERSION=screw-yolox-v1`.)
+   Le backend ne fait que relayer vers l'ai-service : c'est bien le modele charge
+   par l'**ai-service** qui realise la detection. (Pour l'affichage, le backend
+   expose `AI_DETECTOR_MODE=yolox_onnx` et `COUNT_REAL_MODEL_VERSION=screw-yolox-v1`.)
 
 3. Verifie :
 
@@ -115,10 +112,6 @@ attendu par `ai-service/app/detectors/yolox_onnx.py`. Entree : `[1, 3, 640, 640]
 
    Le champ mode/version doit refleter YOLOX. Refais une capture dans l'app : le
    comptage doit maintenant gerer les vis proches.
-
-### Revenir au detecteur baseline
-
-Relance simplement l'ai-service avec `$env:AI_DETECTOR_MODE='baseline'`.
 
 ### Avec Docker (alternative)
 
@@ -137,7 +130,7 @@ qui active `AI_DETECTOR_MODE=yolox_onnx` avec `models/yolox.onnx` monte sur `/mo
 
 ## Fichiers de ce dossier
 
-- `preannotate.py` — pre-annotation YOLO automatique (baseline).
+- `preannotate.py` — pre-annotation YOLO automatique (heuristique vision).
 - `prepare_dataset.py` — assemblage train/val/test au format YOLO.
 - `yolox_screw_exp.py` — config d'experience YOLOX (1 classe `screw`).
 - `train_yolox_colab.ipynb` — notebook Colab d'entrainement + export ONNX.

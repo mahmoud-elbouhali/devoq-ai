@@ -28,13 +28,13 @@ export class RealCountEngine implements CountEngine {
     mode: "real" as const,
     model_version: process.env.COUNT_REAL_MODEL_VERSION
       ?? process.env.AI_MODEL_VERSION
-      ?? "vision-baseline-v1",
+      ?? "screw-yolox-v1",
     capabilities: [
       "single_capture",
       "live_preview",
       "http_delegate",
       "stable_surface_counting",
-      `detector:${process.env.AI_DETECTOR_MODE ?? "baseline"}`,
+      `detector:${process.env.AI_DETECTOR_MODE ?? "yolox_onnx"}`,
     ],
   };
 

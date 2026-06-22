@@ -16,7 +16,7 @@ describe("RealCountEngine", () => {
         confidence: 0.88,
         detections: [{ x: 10, y: 20, w: 30, h: 40, conf: 0.88 }],
         inference_ms: 48,
-        model_version: "simple-vision-v1",
+        model_version: "screw-yolox-v1",
         mode: "real",
         warnings: [],
       }),

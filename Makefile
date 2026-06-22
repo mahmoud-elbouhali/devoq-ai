@@ -1,8 +1,10 @@
-.PHONY: help dev dev-yolox prod build stop logs ps health clean clean-all annoter reannoter labelimg preparer
+.PHONY: help dev dev-yolox prod build stop logs ps health clean clean-all annoter reannoter labelimg preparer gold-batch
 
 COMPOSE_DEV  := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_DEV_YOLOX := docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.yolox.dev.yml
 COMPOSE_PROD := docker compose -f docker-compose.yml -f docker-compose.prod.yml
+SYSTEM_PYTHON := /usr/bin/python3
+LABELIMG_BIN := .venv_labelimg/bin/labelImg
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -44,13 +46,16 @@ clean-all: ## Stop, remove volumes and images
 # ── Pipeline d'entraînement local (sans Docker) ──────────────────────────────
 
 annoter: ## Pre-annoter les captures (genere les .txt YOLO dans datasets/raw/annotated)
-	python3 training/preannotate.py --images datasets/raw/captures --out datasets/raw/annotated --copy-images
+	$(SYSTEM_PYTHON) training/preannotate.py --images datasets/raw/captures --out datasets/raw/annotated --copy-images
 
 reannoter: ## Regenerer toutes les pre-annotations (ecrase les .txt existants)
 	python3 training/preannotate.py --images datasets/raw/captures --out datasets/raw/annotated --copy-images --overwrite --detector opencv --min-box-ratio 0.02 --max-box-ratio 0.25 --edge-margin-ratio 0.02
 
 labelimg: ## Ouvrir labelImg sur les annotations pour correction manuelle
-	labelImg datasets/raw/annotated datasets/raw/annotated/classes.txt
+	$(LABELIMG_BIN) datasets/raw/annotated datasets/raw/annotated/classes.txt
 
 preparer: ## Assembler le dataset train/val/test (apres correction dans labelImg)
-	python3 training/prepare_dataset.py --src datasets/raw/annotated --clean
+	$(SYSTEM_PYTHON) training/prepare_dataset.py --src datasets/raw/annotated --clean
+
+gold-batch: ## Selectionner un premier lot "gold" diversifie a annoter proprement
+	$(SYSTEM_PYTHON) training/select_gold_set.py --images datasets/raw/captures --annotated-root datasets/raw/annotated --out datasets/raw/gold_batch --size 96
